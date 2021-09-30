@@ -26,15 +26,15 @@ for n in range(N_file):
 	if max(data['ccf']) >= max_flux:
 		max_flux = max(data['ccf'])
 		N_tpl = n
-		idx = (data['V_grid'] < 0.2e7) & (data['V_grid'] > -0.3e7)
+		idx = (data['V_grid'] < 0.1e7) & (data['V_grid'] > -0.2e7)
 		V_grid = data['V_grid'][idx] / 1e5
 
 # Read and normalise the CCFs
 for n in range(N_file):
 	hdulist     = fits.open(FILE[n])
 	data         = hdulist[1].data
-	idx = (data['V_grid'] < 0.2e7) & (data['V_grid'] > -0.3e7)
-	normalised_flux = (1 - data['ccf'] / max(data['ccf']))[idx]
+	idx = (data['V_grid'] < 0.1e7) & (data['V_grid'] > -0.2e7)
+	normalised_flux = (1 - data['ccf'] / np.mean(data['ccf']))[idx]
 	try:
 	    CCF
 	except NameError:
@@ -43,10 +43,16 @@ for n in range(N_file):
 	    eCCF
 	except NameError:
 		eCCF = np.zeros((normalised_flux.size, N_file))
-	CCF[:,n] = (1 - data['ccf'] / max(data['ccf']))[idx]
-	eCCF[:,n] = (data['e_ccf'] / max(data['ccf']))[idx]
+	CCF[:,n] = (1 - data['ccf'] / np.mean(data['ccf']))[idx]
+	eCCF[:,n] = (data['e_ccf'] / np.mean(data['ccf']))[idx]
+	# print(np.mean(data['e_ccf']))
+	# print(np.mean(data['ccf'] / data['e_ccf']))
 
-# plt.plot(V_grid, eCCF)
+# plt.plot(V_grid, CCF)
+# plt.ylim([0,0.5])
+# plt.xlim([-25,15])
+# plt.xlabel('V_grid [km/s]')
+# plt.ylabel('Flux')
 # plt.show()
 
 #==============================================================================
@@ -55,23 +61,39 @@ for n in range(N_file):
 shift_spectrum, err_shift_spectrum, power_spectrum, err_power_spectrum, RV_gauss = FIESTA(V_grid, CCF, eCCF)
 
 # Convertion from km/s to m/s
-shift_spectrum = shift_spectrum * 1000
-err_shift_spectrum = err_shift_spectrum * 1000
-power_spectrum = power_spectrum * 1000
-err_power_spectrum = err_power_spectrum * 1000
-RV_gauss = RV_gauss * 1000
-
-RV_gauss = RV_gauss - np.mean(RV_gauss)
+shift_spectrum 		= shift_spectrum * 1000
+err_shift_spectrum 	= err_shift_spectrum * 1000
+power_spectrum 		= power_spectrum * 1000
+err_power_spectrum 	= err_power_spectrum * 1000
+RV_gauss 			= RV_gauss * 1000
+RV_gauss 			= RV_gauss - np.mean(RV_gauss)  # not used 
 
 #==============================================================================
 # Write to file
 #==============================================================================
-N_FIESTA_freq = shift_spectrum.shape[1]
+import pandas as pd
+df 				= pd.read_csv('./data/101501/101501_activity.csv')
+CCF_RV 			= df['CCF RV [m/s]'] - np.mean(df['CCF RV [m/s]'])
+CBC_RV 			= df['CBC RV [m/s]'] - np.mean(df['CBC RV [m/s]'])
+N_FIESTA_freq 	= shift_spectrum.shape[1]
 if 1:
 	for i in range(N_FIESTA_freq):
-		np.savetxt('FIESTA'+str(i+1)+'.txt', shift_spectrum[:, i]-RV_gauss)
+		np.savetxt('FIESTA'+str(i+1)+'.txt', shift_spectrum[:, i]-CCF_RV)
 	for i in range(N_FIESTA_freq):
 		np.savetxt('FIESTA'+str(i+1)+'_err.txt', err_shift_spectrum[:, i])
+
+# write to CSV file
+
+
+df_shift_spectrum = pd.DataFrame(data=np.hstack([shift_spectrum, err_shift_spectrum]),
+                  columns=['x_0(xi_1)', 'x_0(xi_2)', 'x_0(xi_3)', 'x_0(xi_4)', 'x_0(xi_5)',
+                 'err_x_0(xi_1)', 'err_x_0(xi_2)', 'err_x_0(xi_3)', 'err_x_0(xi_4)', 'err_x_0(xi_5)'])
+
+df_shift_spectrum.to_csv('pennstate_fiesta1_results.csv')
+
+
+
+
 
 #==============================================================================
 # Plots 
@@ -80,16 +102,36 @@ if 1:
 #================#
 # RV time series #
 #================#
-import pandas as pd
 plt.rcParams.update({'font.size': 15})
 plt.subplots(figsize=(12, 6))
-df = pd.read_csv('./data/101501/101501_activity.csv')
-plt.errorbar(df['Time [MJD-40000]'], df['CBC RV [m/s]'] - np.mean(df['CBC RV [m/s]']), df['CBC RV Error [m/s]'], marker='o', ls='none', alpha= 0.5, label='CBC RV')
-plt.errorbar(df['Time [MJD-40000]'], df['CCF RV [m/s]'] - np.mean(df['CCF RV [m/s]']), df['CCF RV Error [m/s]'], marker='o', ls='none', alpha= 0.5, label='CCF RV')
+plt.errorbar(df['Time [MJD-40000]'], CBC_RV, df['CBC RV Error [m/s]'], marker='o', ls='none', alpha= 0.5, label='CBC RV')
+plt.errorbar(df['Time [MJD-40000]'], CCF_RV, df['CCF RV Error [m/s]'], marker='o', ls='none', alpha= 0.5, label='CCF RV')
+plt.errorbar(df['Time [MJD-40000]'], RV_gauss, df['CCF RV Error [m/s]'], marker='o', ls='none', alpha= 0.5, label='RV_gauss')
 plt.xlabel('Time [MJD-40000]')
 plt.ylabel('RV [m/s]')
 plt.legend()
 plt.show()
+
+
+def gaussian(x, amp, mu, sig, c):
+    return amp * np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.))) + c
+
+CCF_RV = np.array(CCF_RV)
+eCCF_RV = np.array(df['CCF RV Error [m/s]'])
+time = np.array(df['Time [MJD-40000]'])
+w_RV = np.zeros(time.shape)
+
+
+def w(t):
+	 return 1/eCCF_RV**2 * gaussian(abs(t-time), 1, 0, 1, 0)
+
+# for i in range(len(time)):
+w_RV = CCF_RV * w(time) / sum(w(time))
+
+plt.plot(time, CCF_RV - w_RV, '.')
+plt.show()
+
+
 
 #===========================#
 # FIESTA shifts time series #
@@ -97,7 +139,7 @@ plt.show()
 fig, axes = plt.subplots(figsize=(12, 10))
 for i in range(N_FIESTA_freq):
 	ax = plt.subplot(N_FIESTA_freq,1,i+1)
-	plt.errorbar(df['Time [MJD-40000]'], shift_spectrum[:, i] - (df['CCF RV [m/s]']-np.mean(df['CCF RV [m/s]'])), err_shift_spectrum[:, i], marker='o', ls='', alpha=0.5)
+	plt.errorbar(df['Time [MJD-40000]'], shift_spectrum[:, i] - CCF_RV, err_shift_spectrum[:, i], marker='o', ls='', alpha=0.5)
 	plt.ylabel(r'RV$_{%d}$ [m/s]' %(i+1))
 	if i != N_FIESTA_freq-1:
 		ax.set_xticks([])
